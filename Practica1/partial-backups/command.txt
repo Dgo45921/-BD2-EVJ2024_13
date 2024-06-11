@@ -1,1 +1,2 @@
-mysqldump -u root -p mydb table_name > ./partial_backup.sql
+mysqldump -u root -p mydb table_name > ./table_name_parcial.sql
+
