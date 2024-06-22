@@ -138,11 +138,8 @@ BEGIN
     END CATCH;
 END;
 
--- call ////////////////////////////////////////////////////////
-
-    /*
-
-    DECLARE @FirstName VARCHAR(max) = 'John';
+/* call ////////////////////////////////////////////////////////
+DECLARE @FirstName VARCHAR(max) = 'John';
 DECLARE @LastName VARCHAR(max) = 'Doe';
 DECLARE @Email VARCHAR(max) = 'john.doe@example.com';
 DECLARE @DateOfBirth DATETIME2(7) = '1990-01-01';
@@ -156,14 +153,11 @@ EXEC proyecto1.PR1
     @DateOfBirth = @DateOfBirth,
     @Password = @Password,
     @Credits = @Credits;
+*/
 
+-- PROCEDIMIENTO 2 ============================================
 
-    */
-
-
-    -- PROCEDIMIENTO 2 ============================================
-
-    CREATE PROCEDURE proyecto1.PR2
+CREATE PROCEDURE proyecto1.PR2
     @Email NVARCHAR(255),
     @CodCourse INT
 AS
@@ -219,13 +213,127 @@ BEGIN
     END
 END;
 
-
-
 /* call //////////////////////////////////////////////////////////////////////
-EXEC proyecto1.PR2 @Email = 'john.doe@example.com', @CodCourse = 970;
-
+EXEC proyecto1.PR2
+    @Email = 'john.doe@example.com',
+    @CodCourse = 970;
 */
 
+-- PROCEDIMIENTO 3 =====================================================
+CREATE PROCEDURE proyecto1.PR3
+    @email varchar(max),
+    @CodCourse int
+AS
+BEGIN
+    SET NOCOUNT ON;
+	-- Variables Curso
+    DECLARE @CreditsRequired int;
+	DECLARE @CourseName nvarchar(max)
+	--Variables Estudiante
+    DECLARE @Credits int;
+    DECLARE @IdStudent uniqueidentifier;
+	-- Variables Tutor
+    DECLARE @IdTutor uniqueidentifier;
+    DECLARE @EmailTutor nvarchar(max);
+
+	-- Inicio transaccion
+	BEGIN TRY
+        BEGIN TRANSACTION;
+			-- Buscar el usuario y sus datos relacionados
+			SELECT @Credits = ps.Credits,
+				   @IdStudent = u.Id
+			FROM proyecto1.Usuarios u
+			INNER JOIN proyecto1.ProfileStudent ps ON u.Id = ps.UserId
+			INNER JOIN proyecto1.UsuarioRole ur ON u.Id = ur.UserId
+			INNER JOIN proyecto1.Roles r ON ur.RoleId = r.Id
+			WHERE u.Email = @Email AND r.RoleName = 'Student';
+
+			-- 1. Verificar si se encontró un usuario con el correo y rol adecuados
+			IF @@ROWCOUNT = 0
+			BEGIN
+				-- Si no se encontró ningún registro, arrojar un mensaje de error
+				RAISERROR('No se encontró ningún usuario con el correo especificado y rol de "Student".', 16, 1);
+				RETURN; -- Salir del procedimiento
+			END
+
+			-- Buscar si el estudiante ya se encuentra asignado
+			SELECT * FROM proyecto1.CourseAssignment ca 
+				WHERE ca.CourseCodCourse = @CodCourse and ca.StudentId = @IdStudent;
+
+			-- 2. Verificar que no se encontraron coincidencias
+			IF @@ROWCOUNT != 0
+			BEGIN
+				-- Si no se encontró el curso, arrojar un mensaje de error
+				RAISERROR('El estudiante con el codigo ingresado ya se encuentra asignado al curso', 16, 1);
+				RETURN; -- Salir del procedimiento
+			END
+
+			-- Buscar los créditos requeridos del curso y al tutor
+			SELECT TOP 1
+				   @CreditsRequired = c.CreditsRequired,
+				   @CourseName = c.Name,
+				   @EmailTutor = u.Email,
+				   @IdTutor = ct.TutorId
+			FROM proyecto1.Course c
+			INNER JOIN proyecto1.CourseTutor ct ON c.CodCourse = ct.CourseCodCourse
+			INNER JOIN proyecto1.Usuarios u ON ct.TutorId = u.Id
+			WHERE c.CodCourse = @CodCourse;
+
+			-- 3. Verificar si se encontró el curso
+			IF @@ROWCOUNT = 0
+			BEGIN
+				-- Si no se encontró el curso, arrojar un mensaje de error
+				RAISERROR('No se encontró ningún curso con el código especificado.', 16, 1);
+				RETURN; -- Salir del procedimiento
+			END
+
+			-- Verificar si los créditos del usuario son mayores o iguales a los requeridos por el curso
+			IF @Credits >= @CreditsRequired
+			BEGIN
+				PRINT 'Asignando al usuario...';
+				-- Insertar la asignación del curso al estudiante
+				INSERT INTO proyecto1.CourseAssignment (StudentId, CourseCodCourse) 
+				VALUES (@IdStudent, @CodCourse);
+
+				-- Enviar mensaje de notificación al tutor y al estudiante
+				INSERT INTO proyecto1.Notification (UserId, Message, Date)
+				VALUES (@IdTutor, CONCAT('Un nuevo estudiante se ha asignado a su curso. Estudiante: ', @Email, ', Curso: ', @CourseName ), GETDATE()),
+					   (@IdStudent, CONCAT('Te has asignado correctamente al Curso: ', @CourseName, ', Codigo: ', @CodCourse), GETDATE());
+				PRINT 'Usuario Asignado';
+			END
+			ELSE
+			BEGIN
+				-- Si los créditos no son suficientes, arrojar un mensaje de error
+				RAISERROR('Los créditos del usuario no son suficientes para inscribirse en este curso.', 16, 1);
+				RETURN; -- Salir del procedimiento
+			END
+			-- Commit de la transacción si todo fue exitoso
+				COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        -- Rollback de la transacción en caso de error
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        -- Capturar y manejar el error
+        DECLARE @ErrorMessage NVARCHAR(4000);
+        DECLARE @ErrorSeverity INT;
+        DECLARE @ErrorState INT;
+
+        SELECT 
+            @ErrorMessage = ERROR_MESSAGE(),
+            @ErrorSeverity = ERROR_SEVERITY(),
+            @ErrorState = ERROR_STATE();
+
+        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
+    END CATCH;
+END;
+
+/* CALL //////////////////////////////////////////////////////////////////////
+EXEC proyecto1.PR3
+	@email = 'juan.perez@example.com',
+	@CodCourse = 283;
+*/
 
 -- PROCEDIMIENTO 5 =====================================================
 CREATE PROCEDURE proyecto1.PR5 (@CodCourse int, @Name nvarchar(max), @CreditsRequired int)
@@ -279,11 +387,12 @@ AS BEGIN
 	END CATCH;
 END;
 
--- CALL ////////////////////////////////////////////////////////////////////////////
-
--- EXEC proyecto1.PR5 @CodCourse = 123, @Name = N'Compiladores 1', @CreditsRequired = 4;
-
-
+/* CALL ////////////////////////////////////////////////////////////////////////////
+EXEC proyecto1.PR5
+    @CodCourse = 123,
+    @Name = N'Compiladores 1',
+    @CreditsRequired = 4;
+*/
 
 -- PROCEDIMIENTO 6 =====================================================================================
 
